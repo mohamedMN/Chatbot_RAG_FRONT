@@ -1,0 +1,4 @@
+/* If your template refers to index.css elsewhere, keep it minimal: */
+* {
+  box-sizing: border-box;
+}
