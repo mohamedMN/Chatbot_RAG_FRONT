@@ -1,4 +1,5 @@
 import React from "react";
+import Logo from "./Logo";
 
 export default function ChatSidebar({
   history = [],
@@ -9,7 +10,7 @@ export default function ChatSidebar({
   return (
     <aside className="w-72 bg-neutral-950/60 border-r border-white/10 hidden md:flex md:flex-col">
       <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
-        <div className="h-7 w-7 rounded bg-orange-brand" />
+        <Logo/>
         <div className="font-semibold">Chat History</div>
       </div>
 

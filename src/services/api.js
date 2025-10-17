@@ -1,76 +1,74 @@
 // src/services/api.js
+import axios from "axios";
+
 const BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000/api";
 
-// -------- AUTH (cookie-based) ----------
-// src/services/api.js
-// src/services/api.js
-export async function apiSignup(email, password, role = "user") {
-  const res = await fetch(`${BASE}/auth/signup`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ email, password, role }), // backend will ignore/force if you kept Option A
-  });
-  if (!res.ok) {
-    let msg = "Erreur lors de la création du compte";
-    try {
-      const data = await res.json();
-      if (data?.detail) msg = data.detail;
-      if (data?.message) msg = data.message;
-    } catch {}
-    throw new Error(msg);
+// ---------------------------------------------
+// Axios instance (cookies, baseURL, erreurs)
+// ---------------------------------------------
+const api = axios.create({
+  baseURL: BASE,
+  withCredentials: true, // important pour les cookies cross-origin
+  headers: { "Content-Type": "application/json" },
+});
+
+// formateur d'erreur lisible
+function toError(err, fallback = "Request failed") {
+  if (err?.response?.data) {
+    const d = err.response.data;
+    const msg = d.detail || d.message || d.error;
+    if (msg) return new Error(msg);
   }
-  return res.json(); // { user_id, email, role }
+  if (err?.message) return new Error(err.message);
+  return new Error(fallback);
 }
 
-
-
+// ---------------------------------------------
+// AUTH (cookie-based)
+// ---------------------------------------------
+export async function apiSignup(email, password, role = "user") {
+  try {
+    const { data } = await api.post("/auth/signup", { email, password, role });
+    return data; // { user_id, email, role }
+  } catch (err) {
+    throw toError(err, "Erreur lors de la création du compte");
+  }
+}
 
 export async function apiLogin(email, password) {
-  const r = await fetch(`${BASE}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include", // <— important, use cookies across origins
-    body: JSON.stringify({ email, password }),
-  });
-  if (!r.ok) {
-    const msg = await safeText(r);
-    throw new Error(msg || `Login failed (${r.status})`);
+  try {
+    const { data } = await api.post("/auth/login", { email, password });
+    return data; // { user: {...} }
+  } catch (err) {
+    throw toError(err, "Login failed");
   }
-  return r.json(); // { user: {...} }
 }
 
 export async function apiLogout() {
-  const r = await fetch(`${BASE}/auth/logout`, {
-    method: "POST",
-    credentials: "include",
-  });
-  if (!r.ok) {
-    const msg = await safeText(r);
-    throw new Error(msg || `Logout failed (${r.status})`);
+  try {
+    const { data } = await api.post("/auth/logout");
+    return data; // { ok: true }
+  } catch (err) {
+    throw toError(err, "Logout failed");
   }
-  return r.json(); // { ok: true }
 }
 
 export async function apiMe() {
-  const r = await fetch(`${BASE}/auth/me`, {
-    method: "GET",
-    credentials: "include",
-  });
-  if (!r.ok) {
-    // return null on 401 so context can handle unauthenticated state
-    if (r.status === 401) return null;
-    const msg = await safeText(r);
-    throw new Error(msg || `Me failed (${r.status})`);
+  try {
+    const { data } = await api.get("/auth/me");
+    return data; // { user: {...} }
+  } catch (err) {
+    // renvoyer null sur 401 pour gérer l'état non authentifié côté contexte
+    if (err?.response?.status === 401) return null;
+    throw toError(err, "Me failed");
   }
-  return r.json(); // { user: {...} }
 }
 
-// -------- RAG / ASK ----------
-export async function ask(q, opts = {}, workspaceId) {
-  const params = new URLSearchParams();
-  if (workspaceId) params.set("workspace", workspaceId);
-  const r = await fetch(`${BASE}/ask?${params.toString()}`, {
+// ---------------------------------------------
+// RAG / ASK
+// ---------------------------------------------
+export async function ask(q, opts = {}, session_id) {
+  const r = await fetch(`${BASE}/ask`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -79,77 +77,91 @@ export async function ask(q, opts = {}, workspaceId) {
       k: opts.k ?? 4,
       min_score: opts.min_score ?? 0.3,
       include_context: !!opts.include_context,
+      session_id: session_id || null, // <- keep same session
     }),
   });
   if (!r.ok) throw new Error(`ask failed (${r.status})`);
-  return r.json();
+  return r.json(); // { answer, session_id, ... }
 }
 
-// -------- Workspaces (optional, for your flow) ----------
+// ---------------------------------------------
+// Workspaces
+// ---------------------------------------------
 export async function createWorkspace() {
-  const r = await fetch(`${BASE}/workspaces`, {
-    method: "POST",
-    credentials: "include",
-  });
-  if (!r.ok) throw new Error(`WS create failed (${r.status})`);
-  return r.json(); // { ws_id }
+  try {
+    const { data } = await api.post("/workspaces");
+    return data; // { ws_id }
+  } catch (err) {
+    throw toError(err, "WS create failed");
+  }
 }
 
 export async function buildWorkspace(wsId) {
-  const r = await fetch(`${BASE}/workspaces/${wsId}/build`, {
-    method: "POST",
-    credentials: "include",
-  });
-  if (!r.ok) throw new Error(`WS build failed (${r.status})`);
-  return r.json();
+  try {
+    const { data } = await api.post(`/workspaces/${wsId}/build`);
+    return data;
+  } catch (err) {
+    throw toError(err, "WS build failed");
+  }
 }
 
 export async function uploadDoc(file, wsId) {
-  const fd = new FormData();
-  fd.append("file", file);
-  const r = await fetch(`${BASE}/workspaces/${wsId}/documents`, {
-    method: "POST",
-    body: fd,
-    credentials: "include",
-  });
-  if (!r.ok) throw new Error(`upload failed (${r.status})`);
-  return r.json();
-}
-
-// -------- utils ----------
-async function safeText(res) {
   try {
-    return await res.text();
-  } catch {
-    return "";
+    const fd = new FormData();
+    fd.append("file", file);
+    const { data } = await api.post(`/workspaces/${wsId}/documents`, fd, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return data;
+  } catch (err) {
+    throw toError(err, "upload failed");
   }
 }
+
+// ---------------------------------------------
+// Admin
+// ---------------------------------------------
 export async function adminPing() {
-  const r = await fetch(`${BASE}/admin/ping`, { credentials: "include" });
-  if (!r.ok) throw new Error(`admin ping failed (${r.status})`);
-  return r.json();
+  try {
+    const { data } = await api.get("/admin/ping");
+    return data;
+  } catch (err) {
+    throw toError(err, "admin ping failed");
+  }
 }
 
 export async function getStats() {
-  const r = await fetch(`${BASE}/admin/stats`, { credentials: "include" });
-  if (!r.ok) throw new Error(`stats failed (${r.status})`);
-  return r.json();
+  try {
+    const { data } = await api.get("/admin/stats");
+    return data;
+  } catch (err) {
+    throw toError(err, "stats failed");
+  }
 }
 
 export async function adminReindex() {
-  const r = await fetch(`${BASE}/admin/reindex`, {
-    method: "POST",
-    credentials: "include",
-  });
-  if (!r.ok) throw new Error(`reindex failed (${r.status})`);
-  return r.json();
+  try {
+    const { data } = await api.post("/admin/reindex");
+    return data;
+  } catch (err) {
+    throw toError(err, "reindex failed");
+  }
 }
 
 export async function adminFlushIndex() {
-  const r = await fetch(`${BASE}/admin/flush-index`, {
-    method: "POST",
-    credentials: "include",
-  });
-  if (!r.ok) throw new Error(`flush failed (${r.status})`);
-  return r.json();
+  try {
+    const { data } = await api.post("/admin/flush-index?wipe_db=true");
+    return data;
+  } catch (err) {
+    throw toError(err, "flush failed");
+  }
+}
+
+export async function getAdminConfig() {
+  try {
+    const { data } = await api.get("/admin/config");
+    return data;
+  } catch (err) {
+    throw toError(err, "config failed");
+  }
 }

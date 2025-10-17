@@ -10,6 +10,7 @@ import {
   AlertCircle,
   ShieldCheck,
 } from "lucide-react";
+import Logo from "../components/Logo.jsx";
 
 export default function Signup() {
   const nav = useNavigate();
@@ -112,7 +113,7 @@ export default function Signup() {
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
-          <div className="h-8 w-8 rounded-lg bg-orange-brand" />
+          <Logo />
           <div className="font-semibold">Orange Business · webMethods</div>
         </div>
 

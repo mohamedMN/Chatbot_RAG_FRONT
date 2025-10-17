@@ -21,7 +21,7 @@ export function AuthProvider({ children }) {
     (async () => {
       try {
         const me = await apiMe();
-        if (mounted) setUser(me?.user || null);
+        if (mounted) setUser(me || null);
       } catch {
         if (mounted) setUser(null);
       } finally {
@@ -33,18 +33,18 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-   async function login(email, password) {
-     setLoading(true);
-     try {
-       const res = await apiLogin(email, password);
-       setUser(
-         res.user || { id: res.user_id, email: res.email, role: res.role }
-       ); // depending on your backend shape
-       return res;
-     } finally {
-       setLoading(false);
-     }
-   }
+  async function login(email, password) {
+    setLoading(true);
+    try {
+      const res = await apiLogin(email, password);
+      setUser(
+        res.user || { id: res.user_id, email: res.email, role: res.role }
+      ); // depending on your backend shape
+      return res;
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function signup(email, password, role = "user") {
     setLoading(true);

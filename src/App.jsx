@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "./state/AuthContext.jsx";
 import "./styles/tailwind.css";
 import "./App.css";
 import Signup from "./pages/Signup.jsx";
+import HistoryPage from "./pages/HistoryPage.jsx";
 
 function Protected({ children, role = "admin" }) {
   const { user } = useAuth();
@@ -25,12 +26,15 @@ export default function App() {
           <Route path="/chat" element={<Chat />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/history" element={<HistoryPage />} />
           <Route
             path="/admin"
             element={
               <Protected>
                 <AdminDashboard />
               </Protected>
+
+              // <AdminDashboard />
             }
           />
           <Route path="*" element={<Navigate to="/" replace />} />

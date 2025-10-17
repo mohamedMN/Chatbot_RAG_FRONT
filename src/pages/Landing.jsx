@@ -12,6 +12,7 @@ import {
   FolderKanban,
   BookOpen,
 } from "lucide-react";
+import Logo from "../components/Logo";
 
 // --- Constants (JS only, no TypeScript) ---
 const CATEGORIES = ["Général", "API", "ESB", "Events"];
@@ -63,10 +64,14 @@ export default function Landing() {
             aria-label={sidebarOpen ? "Fermer le menu" : "Ouvrir le menu"}
             onClick={() => setSidebarOpen((s) => !s)}
           >
-            {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            {sidebarOpen ? (
+              <X className="h-5 w-5" />
+            ) : (
+              <Menu className="h-5 w-5" />
+            )}
           </button>
           <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-orange-brand" />
+            <Logo />
             <span className="font-semibold">Orange Business</span>
           </div>
           <Link
@@ -86,7 +91,7 @@ export default function Landing() {
           } md:block md:sticky md:top-6 h-fit rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-4`}
         >
           <div className="hidden md:flex items-center gap-2 mb-6">
-            <div className="h-8 w-8 rounded-lg bg-orange-brand" />
+            <Logo />
             <div className="font-semibold">Orange Business</div>
           </div>
 
@@ -138,7 +143,7 @@ export default function Landing() {
           {/* Header (desktop) */}
           <div className="hidden md:flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-lg bg-orange-brand" />
+              <Logo />
               <div className="text-xl font-semibold">Assistant webMethods</div>
             </div>
             <div className="flex items-center gap-3">
@@ -149,7 +154,7 @@ export default function Landing() {
                 Open Chat
               </Link>
               <Link
-                to="/login"
+                to="/admin"
                 className="h-10 inline-flex items-center rounded-xl bg-orange-brand px-4 font-medium text-black shadow-[0_8px_20px_-8px_rgba(255,140,0,0.6)] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
               >
                 Admin

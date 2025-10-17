@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../state/AuthContext.jsx";
 import { Mail, Lock, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
+import Logo from "../components/Logo.jsx";
 
 export default function Login() {
   const nav = useNavigate();
@@ -9,18 +10,28 @@ export default function Login() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(false);
   const [err, setErr] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [capsOn, setCapsOn] = useState(false);
+
   const emailRef = useRef(null);
   const pwdRef = useRef(null);
 
-  // autofocus sur email
+  // On mount: preload remembered email (frontend only)
   useEffect(() => {
-    emailRef.current?.focus();
+    const remembered = localStorage.getItem("remember_me") === "true";
+    const rememberedEmail = localStorage.getItem("remember_email") || "";
+    if (remembered && rememberedEmail) {
+      setRemember(true);
+      setEmail(rememberedEmail);
+      // focus password if email already filled
+      setTimeout(() => pwdRef.current?.focus(), 0);
+    } else {
+      emailRef.current?.focus();
+    }
   }, []);
 
-  // bouton désactivé si champs vides
   const isDisabled = useMemo(
     () => loading || email.trim() === "" || password.trim() === "",
     [loading, email, password]
@@ -29,12 +40,21 @@ export default function Login() {
   async function onSubmit(e) {
     e.preventDefault();
     setErr("");
+
+    // Persist or clear local email based on checkbox
+    if (remember) {
+      localStorage.setItem("remember_me", "true");
+      localStorage.setItem("remember_email", email.trim());
+    } else {
+      localStorage.removeItem("remember_me");
+      localStorage.removeItem("remember_email");
+    }
+
     try {
-      await login(email, password); // sets cookie + user (ton hook)
-      nav("/admin", { replace: true }); // go to dashboard
+      await login(email, password); // no API change needed
+      nav("/admin", { replace: true });
     } catch (e) {
       setErr(e?.message || "Erreur d’authentification");
-      // focus sur le champ mot de passe en cas d’échec
       pwdRef.current?.focus();
     }
   }
@@ -44,7 +64,7 @@ export default function Login() {
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
-          <div className="h-8 w-8 rounded-lg bg-orange-brand" />
+          <Logo />
           <div className="font-semibold">Orange Business · webMethods</div>
         </div>
 
@@ -130,7 +150,18 @@ export default function Login() {
             )}
           </label>
 
-          {/* Actions */}
+          {/* Remember me (frontend only) */}
+          <label className="inline-flex items-center gap-2 text-xs text-white/70">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-white/20 bg-white/10"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            <span>Se souvenir de moi sur cet appareil</span>
+          </label>
+
+          {/* Submit */}
           <button
             type="submit"
             disabled={isDisabled}
@@ -144,6 +175,7 @@ export default function Login() {
             {loading ? "Connexion..." : "Se connecter"}
           </button>
         </form>
+
         {/* Footer */}
         <div className="mt-6 flex items-center justify-between text-xs text-white/60">
           <Link to="/" className="hover:underline">

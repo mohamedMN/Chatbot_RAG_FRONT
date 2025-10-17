@@ -19,8 +19,24 @@ import {
   Wrench,
 } from "lucide-react";
 
+// ---------- localStorage utils ----------
+const LS_NAMESPACE = "ob-chat:history";
+
+const safeParse = (s, fallback) => {
+  try {
+    const v = JSON.parse(s);
+    return Array.isArray(v) ? v : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const keyForUser = (userId) => `${LS_NAMESPACE}:${userId || "anon"}`;
+
 export default function Chat() {
   const { user } = useAuth();
+
+  // UI / state
   const [model, setModel] = useState("Standard");
   const [q, setQ] = useState("");
   const [messages, setMessages] = useState([
@@ -30,15 +46,38 @@ export default function Chat() {
         "Bonjour 👋 AI Chat est un assistant pour vos questions webMethods.\nCréez un workspace, uploadez un document (PDF/DOCX/TXT), puis posez votre question.",
     },
   ]);
-  const [history, setHistory] = useState([]);
+
+  const [history, setHistory] = useState([]); // persisted per user
   const [files, setFiles] = useState([]);
   const [dragOver, setDragOver] = useState(false);
   const [workspaceId, setWorkspaceId] = useState("");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
 
+  // Persist conversation session for analytics
+  const [sessionId, setSessionId] = useState(
+    localStorage.getItem("session_id") || ""
+  );
+
   const dropRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  // ---------- Load history on mount / user change ----------
+  useEffect(() => {
+    const key = keyForUser(user?.id);
+    const initial = safeParse(localStorage.getItem(key), []);
+    setHistory(initial);
+  }, [user?.id]);
+
+  // ---------- Persist history whenever it changes ----------
+  useEffect(() => {
+    const key = keyForUser(user?.id);
+    try {
+      localStorage.setItem(key, JSON.stringify(history));
+    } catch {
+      // storage could be full or blocked; fail silently
+    }
+  }, [history, user?.id]);
 
   // ----- helpers -----
   function pushAssistant(text) {
@@ -54,27 +93,46 @@ export default function Chat() {
 
   // ----- ask/send -----
   async function send() {
-    if (!q.trim()) return;
-    const userMsg = { role: "user", content: q };
+    const text = q.trim();
+    if (!text || busy) return;
+
+    setBusy(true);
+
+    // push user's message to the chat immediately
+    const userMsg = { role: "user", content: text };
     setMessages((m) => [...m, userMsg]);
-    setQ("");
+    setQ(""); // clear input for snappy UX
+
     try {
-      const r = await ask(
-        q,
+      const res = await ask(
+        text,
         { k: 6, min_score: 0.3, include_context: true },
-        workspaceId
+        sessionId || null
       );
+
+      // keep the same session across messages (persist once)
+      if (!sessionId && res.session_id) {
+        setSessionId(res.session_id);
+        localStorage.setItem("session_id", res.session_id);
+      }
+
+      // append assistant reply
       setMessages((m) => [
         ...m,
         {
           role: "assistant",
-          content: r.answer,
-          context: r.context,
-          hits: r.hits,
+          content: res.answer,
+          context: res.context, // optional details section
+          hits: res.hits,
         },
       ]);
     } catch (e) {
-      pushError(e?.message || "Erreur d’appel /ask");
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", content: "❌ " + (e?.message || "Erreur /ask") },
+      ]);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -141,6 +199,49 @@ export default function Chat() {
     }
   }
 
+  // ----- history (persisted) -----
+  function newChat() {
+    // Save current conversation to history before resetting
+    setSessionId("");
+    try {
+      localStorage.removeItem("session_id");
+    } catch {}
+
+    setHistory((h) => [
+      ...h,
+      {
+        id: crypto.randomUUID(),
+        title:
+          messages.find((m) => m.role === "user")?.content?.slice(0, 40) ||
+          "Nouvelle conversation",
+        subtitle: new Date().toLocaleString(),
+        snapshot: messages,
+        createdAt: Date.now(),
+      },
+    ]);
+
+    setMessages([
+      {
+        role: "assistant",
+        content:
+          "Nouveau chat. Posez une question ou joignez un document pour l’indexer (workspace requis).",
+      },
+    ]);
+  }
+
+  function openChat(h) {
+    if (!h?.snapshot) return;
+    setMessages(h.snapshot);
+  }
+
+  function deleteAll() {
+    setHistory([]);
+    // eagerly clear the user's history key
+    try {
+      localStorage.removeItem(keyForUser(user?.id));
+    } catch {}
+  }
+
   // ----- workspace actions -----
   async function doCreateWorkspace() {
     try {
@@ -177,34 +278,6 @@ export default function Chat() {
     } finally {
       setBusy(false);
     }
-  }
-
-  // ----- history -----
-  function newChat() {
-    setHistory((h) => [
-      ...h,
-      {
-        id: crypto.randomUUID(),
-        title:
-          messages.find((m) => m.role === "user")?.content?.slice(0, 40) ||
-          "Nouvelle conversation",
-        subtitle: new Date().toLocaleString(),
-        snapshot: messages,
-      },
-    ]);
-    setMessages([
-      {
-        role: "assistant",
-        content:
-          "Nouveau chat. Posez une question ou joignez un document pour l’indexer (workspace requis).",
-      },
-    ]);
-  }
-  function openChat(h) {
-    setMessages(h.snapshot);
-  }
-  function deleteAll() {
-    setHistory([]);
   }
 
   return (
@@ -265,6 +338,7 @@ export default function Chat() {
               </div>
             </div>
           )}
+
           <div className="mx-auto max-w-3xl space-y-4">
             {messages.map((m, i) => (
               <MessageBubble key={i} role={m.role}>
@@ -342,22 +416,15 @@ export default function Chat() {
                 placeholder="Posez une question…"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && send()}
+                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
               />
 
               <button
-                className="inline-flex items-center justify-center rounded-xl px-4 py-2.5 font-medium text-black bg-orange-brand hover:brightness-110"
+                className="inline-flex items-center justify-center rounded-xl px-4 py-2.5 font-medium text-black bg-orange-brand hover:brightness-110 disabled:opacity-50"
                 onClick={send}
-                disabled={busy}
+                disabled={busy || !q.trim()}
               >
                 Envoyer
-              </button>
-
-              <button
-                className="rounded-lg px-3 py-1.5 hover:bg-white/10"
-                title="Mic (placeholder)"
-              >
-                <Mic className="h-4 w-4" />
               </button>
             </div>
 
