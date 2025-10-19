@@ -1,3 +1,4 @@
+// src/pages/HistoryPage.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../state/AuthContext.jsx";
 import AdminSidebar from "../components/AdminSidebar.jsx";
@@ -28,112 +29,124 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // icons
-import { Trash2, Search, ExternalLink } from "lucide-react";
+import { Trash2, Search, ExternalLink, RefreshCw } from "lucide-react";
 
-const KEYS = ["rag_chat_history", "chat_history", "history"];
+// API services
+import { getMySessions, getMessagesBySession } from "@/services/api";
 
-/** Try to read history from localStorage under known keys */
-function readLocalHistory() {
-  for (const k of KEYS) {
-    try {
-      const raw = localStorage.getItem(k);
-      if (!raw) continue;
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) return { key: k, items: arr };
-    } catch {}
-  }
-  return { key: KEYS[0], items: [] };
-}
-
-/** Write history back to the same key we loaded */
-function writeLocalHistory(key, items) {
+// ---- helpers ----
+function fmtDate(s) {
   try {
-    localStorage.setItem(key, JSON.stringify(items));
-  } catch {}
-}
-
-/** Normalize item shape so UI can render robustly */
-function normalizeItem(it) {
-  // expected shape from your Chat.jsx newChat():
-  // { id, title, subtitle, snapshot: [ {role, content, ...}, ... ] }
-  if (!it) return null;
-  const id = it.id || crypto.randomUUID();
-  const title =
-    it.title ||
-    (Array.isArray(it.snapshot)
-      ? it.snapshot.find((m) => m.role === "user")?.content?.slice(0, 40) ||
-        "Conversation"
-      : "Conversation");
-  const subtitle = it.subtitle || it.ts || new Date().toLocaleString();
-  const snapshot = Array.isArray(it.snapshot) ? it.snapshot : [];
-  return { id, title, subtitle, snapshot };
+    return new Date(s).toLocaleString();
+  } catch {
+    return s || "";
+  }
 }
 
 export default function HistoryPage() {
   const { user, logout } = useAuth();
 
-  const [{ key: storageKey, items: rawItems }, setRaw] = useState(() =>
-    readLocalHistory()
-  );
-  const [loading, setLoading] = useState(true);
+  // Sessions state
+  const [sessions, setSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionsError, setSessionsError] = useState(null);
+
+  // Search in sessions
   const [q, setQ] = useState("");
-  const [selected, setSelected] = useState(null);
+
+  // Selected session + messages
+  const [selected, setSelected] = useState(null); // { id, started_at, ... }
+  const [msgs, setMsgs] = useState([]);
+  const [msgsLoading, setMsgsLoading] = useState(false);
+  const [msgsError, setMsgsError] = useState(null);
+
+  // Clear history confirm (optional UI — only clears local preview, NOT DB)
   const [confirmClear, setConfirmClear] = useState(false);
 
-  const items = useMemo(
-    () => rawItems.map(normalizeItem).filter(Boolean),
-    [rawItems]
-  );
-  const filtered = useMemo(() => {
-    if (!q.trim()) return items;
-    const s = q.toLowerCase();
-    return items.filter(
-      (it) =>
-        it.title?.toLowerCase()?.includes(s) ||
-        it.subtitle?.toLowerCase()?.includes(s)
-    );
-  }, [items, q]);
-
-  useEffect(() => {
-    // initial load (already done via lazy init), emulate loading skeleton briefly
-    const t = setTimeout(() => setLoading(false), 200);
-    return () => clearTimeout(t);
-  }, []);
-
-  function removeOne(id) {
-    const next = rawItems.filter(
-      (it) => (it.id || "").toString() !== id.toString()
-    );
-    setRaw({ key: storageKey, items: next });
-    writeLocalHistory(storageKey, next);
-    if (selected?.id === id) setSelected(null);
-  }
-
-  function clearAll() {
-    setRaw({ key: storageKey, items: [] });
-    writeLocalHistory(storageKey, []);
-    setSelected(null);
-    setConfirmClear(false);
-  }
-
-  function openInChat(it) {
-    // Pass snapshot to Chat via sessionStorage, Chat can pick it up on mount.
-    try {
-      sessionStorage.setItem(
-        "chat_restore_snapshot",
-        JSON.stringify(it.snapshot || [])
-      );
-    } catch {}
-    // navigate
-    window.location.href = "/chat";
-  }
-
+  // Guard: admin only (keep your rule)
   if (user?.role !== "admin") {
     return (
       <div className="min-h-dvh grid place-items-center text-white/80">
         Accès refusé — administrateur requis.
       </div>
     );
+  }
+
+  // Load sessions once
+  function loadSessions() {
+    setSessionsLoading(true);
+    setSessionsError(null);
+    getMySessions({ limit: 500 })
+      .then((rows) => setSessions(rows || []))
+      .catch((e) => setSessionsError(e?.message || "Failed to load sessions"))
+      .finally(() => setSessionsLoading(false));
+  }
+
+  useEffect(() => {
+    loadSessions();
+  }, []);
+
+  // Filter sessions by search
+  const filtered = useMemo(() => {
+    if (!q.trim()) return sessions;
+    const s = q.toLowerCase();
+    return sessions.filter(
+      (it) =>
+        it.id?.toLowerCase().includes(s) ||
+        fmtDate(it.started_at).toLowerCase().includes(s) ||
+        (it.email || "").toLowerCase().includes(s)
+    );
+  }, [sessions, q]);
+
+  // Load messages when a session is selected
+  useEffect(() => {
+    if (!selected?.id) {
+      setMsgs([]);
+      setMsgsError(null);
+      return;
+    }
+    let alive = true;
+    setMsgsLoading(true);
+    setMsgsError(null);
+    setMsgs([]);
+
+    getMessagesBySession(selected.id, { limit: 2000 })
+      .then((rows) => {
+        if (!alive) return;
+        setMsgs(rows || []);
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setMsgsError(e?.message || "Failed to load messages");
+      })
+      .finally(() => {
+        if (!alive) return;
+        setMsgsLoading(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [selected?.id]);
+
+  // Optional “open in Chat” — passes the transcript to sessionStorage so your Chat page can restore it
+  function openInChat() {
+    try {
+      const snapshot = (msgs || []).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+      sessionStorage.setItem("chat_restore_snapshot", JSON.stringify(snapshot));
+    } catch {}
+    window.location.href = "/chat";
+  }
+
+  // Optional “clear” only clears what you see locally (does NOT delete DB)
+  function clearLocal() {
+    setSelected(null);
+    setMsgs([]);
+    setMsgsError(null);
+    setConfirmClear(false);
   }
 
   return (
@@ -157,125 +170,116 @@ export default function HistoryPage() {
         </div>
 
         {/* Search + actions */}
-        <section className="grid gap-3 md:grid-cols-[1fr_auto]">
-          <Card className="border-white/10 bg-white/5 backdrop-blur text-white md:col-span-2">
+        <section className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
+          <Card className="border-white/10 bg-white/5 backdrop-blur text-white md:col-span-1">
             <CardContent className="pt-6">
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 opacity-70" />
                   <Input
-                    placeholder="Rechercher par titre ou date…"
+                    placeholder="Rechercher par ID, date ou email…"
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
                     className="pl-9 bg-white/5 border-white/10 text-white placeholder:text-white/50"
                   />
                 </div>
-
-                <Dialog open={confirmClear} onOpenChange={setConfirmClear}>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className="border-red-500/40 text-red-300 hover:bg-red-500/10"
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Tout supprimer
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Vider l’historique ?</DialogTitle>
-                      <DialogDescription>
-                        Action irréversible (localStorage).
-                      </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter className="gap-2 sm:justify-end">
-                      <DialogClose asChild>
-                        <Button variant="outline">Annuler</Button>
-                      </DialogClose>
-                      <Button onClick={clearAll} variant="destructive">
-                        Confirmer
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
               </div>
             </CardContent>
           </Card>
+
+          <Button
+            variant="outline"
+            onClick={loadSessions}
+            className="h-[52px] mt-0 md:self-stretch border-white/20 hover:bg-white/10"
+            title="Rafraîchir la liste des sessions"
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Rafraîchir
+          </Button>
+
+          <Dialog open={confirmClear} onOpenChange={setConfirmClear}>
+            <DialogTrigger asChild>
+              <Button
+                variant="outline"
+                className="h-[52px] md:self-stretch border-red-500/40 text-red-300 hover:bg-red-500/10"
+                title="Effacer la sélection locale"
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Vider la sélection
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Vider la sélection locale ?</DialogTitle>
+                <DialogDescription>
+                  Ça ne supprime rien en base. Ça efface juste la sélection et
+                  les messages affichés.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-2 sm:justify-end">
+                <DialogClose asChild>
+                  <Button variant="outline">Annuler</Button>
+                </DialogClose>
+                <Button onClick={clearLocal} variant="destructive">
+                  Confirmer
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </section>
 
         {/* List + Preview */}
         <section className="grid gap-6 md:grid-cols-2">
-          {/* List */}
+          {/* Sessions list */}
           <Card className="border-white/10 bg-white/5 backdrop-blur text-white">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-white/80">
-                Conversations
-              </CardTitle>
+              <CardTitle className="text-sm text-white/80">Sessions</CardTitle>
               <CardDescription className="hidden" />
             </CardHeader>
             <CardContent className="min-h-[480px] max-h-[60vh] overflow-y-auto">
-              {loading ? (
+              {sessionsLoading ? (
                 <div className="space-y-2">
                   <Skeleton className="h-14 w-full bg-white/10" />
                   <Skeleton className="h-14 w-full bg-white/10" />
                   <Skeleton className="h-14 w-full bg-white/10" />
                 </div>
+              ) : sessionsError ? (
+                <div className="text-sm text-red-300">{sessionsError}</div>
               ) : filtered.length === 0 ? (
-                <div className="text-sm text-white/60">
-                  Aucune conversation.
-                </div>
+                <div className="text-sm text-white/60">Aucune session.</div>
               ) : (
                 <ul className="space-y-2">
                   {filtered.map((it) => {
-                    const count = it.snapshot?.length ?? 0;
+                    const active = selected?.id === it.id;
                     return (
                       <li
                         key={it.id}
                         className={`rounded-xl border border-white/10 bg-white/5 p-3 hover:bg-white/10 transition ${
-                          selected?.id === it.id ? "ring-1 ring-white/20" : ""
+                          active ? "ring-1 ring-white/20" : ""
                         }`}
                       >
                         <button
                           className="w-full text-left"
                           onClick={() => setSelected(it)}
-                          title={it.title}
+                          title={it.id}
                         >
                           <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
                               <div className="font-medium truncate">
-                                {it.title}
+                                {it.email || "Session"}
                               </div>
                               <div className="text-xs text-white/60 truncate">
-                                {it.subtitle}
+                                {fmtDate(it.started_at)} · {it.id}
                               </div>
                             </div>
                             <Badge
                               variant="secondary"
                               className="bg-white/10 border-white/10"
                             >
-                              {count} msg
+                              ID
                             </Badge>
                           </div>
                         </button>
-                        <div className="mt-2 flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            className="h-8 bg-orange-brand text-black hover:brightness-110"
-                            onClick={() => openInChat(it)}
-                          >
-                            <ExternalLink className="h-3.5 w-3.5 mr-2" />
-                            Ouvrir dans Chat
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 border-red-500/40 text-red-300 hover:bg-red-500/10"
-                            onClick={() => removeOne(it.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5 mr-2" />
-                            Supprimer
-                          </Button>
-                        </div>
                       </li>
                     );
                   })}
@@ -284,21 +288,46 @@ export default function HistoryPage() {
             </CardContent>
           </Card>
 
-          {/* Preview */}
+          {/* Messages preview */}
           <Card className="border-white/10 bg-white/5 backdrop-blur text-white">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-white/80">Aperçu</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm text-white/80">
+                  Messages
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  {selected?.id ? (
+                    <Button
+                      size="sm"
+                      className="h-8 bg-orange-brand text-black hover:brightness-110"
+                      onClick={openInChat}
+                      title="Ouvrir cette conversation dans Chat"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5 mr-2" />
+                      Ouvrir dans Chat
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
               <CardDescription className="hidden" />
             </CardHeader>
             <CardContent className="min-h-[480px] max-h-[60vh] overflow-y-auto">
               {!selected ? (
                 <div className="text-sm text-white/60">
-                  Sélectionnez une conversation à gauche.
+                  Sélectionnez une session à gauche.
                 </div>
-              ) : selected.snapshot?.length ? (
+              ) : msgsLoading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-14 w-full bg-white/10" />
+                  <Skeleton className="h-14 w-full bg-white/10" />
+                  <Skeleton className="h-14 w-full bg-white/10" />
+                </div>
+              ) : msgsError ? (
+                <div className="text-sm text-red-300">{msgsError}</div>
+              ) : msgs.length ? (
                 <div className="space-y-3">
-                  {selected.snapshot.map((m, i) => (
-                    <MessageBubble key={i} role={m.role}>
+                  {msgs.map((m) => (
+                    <MessageBubble key={m.id} role={m.role}>
                       {m.content}
                     </MessageBubble>
                   ))}

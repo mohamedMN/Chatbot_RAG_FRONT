@@ -2,26 +2,101 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   ask,
+  askWorkspace,
   uploadDoc,
   createWorkspace,
   buildWorkspace,
+  selectProvider,
+  getProviderStatus,
 } from "../services/api.js";
 import { useAuth } from "../state/AuthContext.jsx";
 import ChatSidebar from "../components/ChatSidebar.jsx";
 import ChatHeader from "../components/ChatHeader.jsx";
 import MessageBubble from "../components/MessageBubble.jsx";
-import {
-  Paperclip,
-  Mic,
-  Trash2,
-  Loader2,
-  FolderPlus,
-  Wrench,
-} from "lucide-react";
+import { Paperclip, Trash2, Loader2, FolderPlus, Wrench } from "lucide-react";
+
+/* ---------------------------- Inline UI widgets --------------------------- */
+function SourceSwitch({ mode, setMode, disabled }) {
+  const Opt = ({ value, label }) => {
+    const active = mode === value;
+    return (
+      <button
+        type="button"
+        onClick={() => setMode(value)}
+        disabled={disabled && value === "workspace"}
+        className={[
+          "px-3 py-1.5 text-sm rounded-lg border transition",
+          active
+            ? "bg-orange-brand text-black border-orange-brand"
+            : "bg-white/5 text-white/80 border-white/15 hover:bg-white/10",
+          disabled && value === "workspace"
+            ? "opacity-50 cursor-not-allowed"
+            : "",
+        ].join(" ")}
+        title={
+          value === "workspace" && disabled
+            ? "Créez/assurez un workspace d’abord"
+            : ""
+        }
+      >
+        {label}
+      </button>
+    );
+  };
+  return (
+    <div className="inline-flex gap-1 bg-white/5 border border-white/10 rounded-xl p-1">
+      <Opt value="workspace" label="Workspace" />
+      <Opt value="global" label="Global" />
+    </div>
+  );
+}
+
+function ProviderSwitch({ value, onChange, disabled, ready }) {
+  const Btn = ({ id, label }) => {
+    const active = value === id;
+    return (
+      <button
+        type="button"
+        onClick={() => onChange(id)}
+        disabled={disabled}
+        className={[
+          "px-3 py-1.5 text-sm rounded-lg border transition",
+          active
+            ? "bg-orange-brand text-black border-orange-brand"
+            : "bg-white/5 text-white/80 border-white/15 hover:bg-white/10",
+          disabled ? "opacity-50 cursor-not-allowed" : "",
+        ].join(" ")}
+      >
+        {label}
+      </button>
+    );
+  };
+  return (
+    <div className="flex items-center gap-2">
+      <div className="inline-flex gap-1 bg-white/5 border border-white/10 rounded-xl p-1">
+        <Btn id="ollama" label="Local (Ollama)" />
+        <Btn id="groq" label="Cloud (Groq)" />
+      </div>
+      {typeof ready === "boolean" && (
+        <span
+          className={[
+            "text-xs rounded px-2 py-0.5 border",
+            ready
+              ? "text-emerald-300 border-emerald-500/30 bg-emerald-500/10"
+              : "text-yellow-300 border-yellow-500/30 bg-yellow-500/10",
+          ].join(" ")}
+          title={ready ? "Fournisseur prêt" : "Fournisseur non prêt"}
+        >
+          {ready ? "ready" : "not ready"}
+        </span>
+      )}
+    </div>
+  );
+}
+/* ------------------------------------------------------------------------- */
 
 // ---------- localStorage utils ----------
 const LS_NAMESPACE = "ob-chat:history";
-
 const safeParse = (s, fallback) => {
   try {
     const v = JSON.parse(s);
@@ -30,8 +105,15 @@ const safeParse = (s, fallback) => {
     return fallback;
   }
 };
-
 const keyForUser = (userId) => `${LS_NAMESPACE}:${userId || "anon"}`;
+const ensureClientSessionId = () => {
+  let sid = localStorage.getItem("session_id");
+  if (!sid) {
+    sid = crypto.randomUUID();
+    localStorage.setItem("session_id", sid);
+  }
+  return sid;
+};
 
 export default function Chat() {
   const { user } = useAuth();
@@ -43,41 +125,131 @@ export default function Chat() {
     {
       role: "assistant",
       content:
-        "Bonjour 👋 AI Chat est un assistant pour vos questions webMethods.\nCréez un workspace, uploadez un document (PDF/DOCX/TXT), puis posez votre question.",
+        "Bonjour 👋 Choisissez la source (Workspace/Global) et le fournisseur LLM (Local Ollama / Cloud Groq), puis posez votre question.",
     },
   ]);
-
-  const [history, setHistory] = useState([]); // persisted per user
+  const [history, setHistory] = useState([]);
   const [files, setFiles] = useState([]);
   const [dragOver, setDragOver] = useState(false);
+
+  const [sessionId, setSessionId] = useState(
+    (typeof window !== "undefined" && localStorage.getItem("session_id")) || ""
+  );
   const [workspaceId, setWorkspaceId] = useState("");
+  const [sourceMode, setSourceMode] = useState("workspace"); // 'workspace' | 'global'
+
+  const [provider, setProvider] = useState(
+    (typeof window !== "undefined" && localStorage.getItem("llm_provider")) ||
+      "ollama"
+  ); // 'ollama' | 'groq'
+  const [providerReady, setProviderReady] = useState(null); // boolean | null
+
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
 
-  // Persist conversation session for analytics
-  const [sessionId, setSessionId] = useState(
-    localStorage.getItem("session_id") || ""
-  );
-
+  // Refs
   const dropRef = useRef(null);
   const fileInputRef = useRef(null);
+  const announcedWorkspaceRef = useRef(false);
 
-  // ---------- Load history on mount / user change ----------
+  // ---------- Load & persist history ----------
   useEffect(() => {
     const key = keyForUser(user?.id);
     const initial = safeParse(localStorage.getItem(key), []);
     setHistory(initial);
   }, [user?.id]);
 
-  // ---------- Persist history whenever it changes ----------
   useEffect(() => {
     const key = keyForUser(user?.id);
     try {
       localStorage.setItem(key, JSON.stringify(history));
-    } catch {
-      // storage could be full or blocked; fail silently
-    }
+    } catch {}
   }, [history, user?.id]);
+
+  // ---------- Ensure session/workspace on mount ----------
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const sid = sessionId || ensureClientSessionId();
+      if (!sessionId) setSessionId(sid);
+
+      try {
+        const ws = await createWorkspace(sid); // idempotent (ws_id = sid)
+        if (cancelled) return;
+        setWorkspaceId(ws.ws_id);
+
+        if (!announcedWorkspaceRef.current) {
+          announcedWorkspaceRef.current = true;
+          setMessages((m) => [
+            ...m,
+            {
+              role: "assistant",
+              content: `✨ Workspace prêt: **${ws.ws_id}**. Importez vos documents puis interrogez en mode **Workspace**.`,
+            },
+          ]);
+        }
+      } catch {
+        // still fine in Global mode
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---------- Select initial provider (status first; else select saved) ----------
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const st = await getProviderStatus(); // GET /api/llm/status
+        let active = st?.active_provider || null;
+        let ready = !!st?.ready;
+
+        if (!active) {
+          const sel = await selectProvider(provider); // POST /api/llm/select
+          active = sel.provider;
+          ready = !!sel.ready;
+        }
+
+        if (cancelled) return;
+        setProvider(active || provider);
+        setProviderReady(ready);
+        localStorage.setItem("llm_provider", active || provider);
+
+        if (!ready) {
+          const name = active || provider;
+          setMessages((m) => [
+            ...m,
+            {
+              role: "assistant",
+              content:
+                `ℹ️ Le fournisseur **${name}** n'est pas prêt. ` +
+                (name === "ollama"
+                  ? "Assurez-vous qu'Ollama tourne et que le modèle est téléchargé."
+                  : "Vérifiez la clé d'API Groq côté serveur."),
+            },
+          ]);
+        }
+      } catch {
+        if (cancelled) return;
+        setProviderReady(false);
+        setMessages((m) => [
+          ...m,
+          {
+            role: "assistant",
+            content:
+              "⚠️ Impossible de sélectionner le fournisseur au démarrage. On reste sur Local (Ollama).",
+          },
+        ]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ----- helpers -----
   function pushAssistant(text) {
@@ -91,62 +263,78 @@ export default function Chat() {
     if (ms) setTimeout(() => setToast(""), ms);
   }
 
-  // ----- ask/send -----
-  async function send() {
-    const text = q.trim();
-    if (!text || busy) return;
-
-    setBusy(true);
-
-    // push user's message to the chat immediately
-    const userMsg = { role: "user", content: text };
-    setMessages((m) => [...m, userMsg]);
-    setQ(""); // clear input for snappy UX
-
+  async function handleProviderChange(next) {
+    if (busy) return;
     try {
-      const res = await ask(
-        text,
-        { k: 6, min_score: 0.3, include_context: true },
-        sessionId || null
+      setBusy(true);
+      const resp = await selectProvider(next);
+      setProvider(resp.provider);
+      setProviderReady(!!resp.ready);
+      localStorage.setItem("llm_provider", resp.provider);
+      showToast(
+        `Fournisseur: ${resp.provider} (${resp.ready ? "ready" : "not ready"})`
       );
-
-      // keep the same session across messages (persist once)
-      if (!sessionId && res.session_id) {
-        setSessionId(res.session_id);
-        localStorage.setItem("session_id", res.session_id);
-      }
-
-      // append assistant reply
-      setMessages((m) => [
-        ...m,
-        {
-          role: "assistant",
-          content: res.answer,
-          context: res.context, // optional details section
-          hits: res.hits,
-        },
-      ]);
+      pushAssistant(
+        `🧠 LLM sélectionné: **${resp.provider}** · état: **${
+          resp.ready ? "ready" : "not ready"
+        }**`
+      );
     } catch (e) {
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", content: "❌ " + (e?.message || "Erreur /ask") },
-      ]);
+      pushError(e?.message || "Impossible de sélectionner le fournisseur");
     } finally {
       setBusy(false);
     }
   }
 
-  // ----- file attach (picker) -----
-  function onPickFiles(e) {
-    const list = Array.from(e.target.files || []);
-    if (!list.length) return;
-    setFiles((prev) => [...prev, ...list]);
-  }
-  function removeFileAt(i) {
-    setFiles((prev) => prev.filter((_, idx) => idx !== i));
+  // ----- send -----
+  async function send() {
+    const text = q.trim();
+    if (!text || busy) return;
+
+    if (sourceMode === "workspace" && !workspaceId) {
+      showToast("Créez/assurez un workspace d’abord (ou passez en Global).");
+      return;
+    }
+
+    setBusy(true);
+
+    // Push user's message immediately
+    setMessages((m) => [...m, { role: "user", content: text }]);
+    setQ("");
+
+    try {
+      const opts = { k: 6, min_score: 0.3, include_context: true };
+      const res =
+        sourceMode === "workspace"
+          ? await askWorkspace(text, opts, workspaceId)
+          : await ask(text, opts, sessionId || null);
+
+      // persist first session id if server returns one (global path)
+      if (!sessionId && res.session_id) {
+        setSessionId(res.session_id);
+        localStorage.setItem("session_id", res.session_id);
+      }
+
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: res.answer,
+          context: res.context,
+          hits: res.hits,
+        },
+      ]);
+    } catch (e) {
+      const msg = /workspace index missing/i.test(String(e?.message || ""))
+        ? "Workspace index manquant. Cliquez sur “Rebuild index”, puis réessayez."
+        : e?.message || "Erreur /ask";
+      pushError(msg);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  // ----- DnD -----
+  // ----- drag & drop -----
   useEffect(() => {
     const el = dropRef.current;
     if (!el) return;
@@ -181,32 +369,85 @@ export default function Chat() {
 
   // ----- upload logic -----
   async function doUpload(list) {
+    const sid = sessionId || ensureClientSessionId();
+    if (!sessionId) setSessionId(sid);
+
     if (!workspaceId) {
-      showToast("Créez un workspace d’abord.");
-      pushAssistant(
-        "ℹ️ Aucun workspace. Cliquez sur « Nouveau workspace » puis réessayez."
-      );
-      return;
+      try {
+        const ws = await createWorkspace(sid);
+        setWorkspaceId(ws.ws_id);
+        if (!announcedWorkspaceRef.current) {
+          announcedWorkspaceRef.current = true;
+          pushAssistant(`✨ Workspace **${ws.ws_id}** prêt pour vos imports.`);
+        }
+      } catch (e) {
+        pushError(e?.message || "Impossible de préparer le workspace");
+        return;
+      }
     }
+
     for (const file of list) {
       pushAssistant(`📄 Import de ${file.name}…`);
       try {
-        const res = await uploadDoc(file, workspaceId);
-        pushAssistant(`✅ Document reçu (${res?.filename ?? file.name}).`);
+        await uploadDoc(file, workspaceId, true); // backend can auto-build
+        pushAssistant(
+          `✅ ${file.name} importé. L’index du workspace sera mis à jour.`
+        );
       } catch (err) {
         pushError(`Import échoué: ${err?.message || "échec réseau"}`);
       }
     }
   }
 
-  // ----- history (persisted) -----
-  function newChat() {
-    // Save current conversation to history before resetting
-    setSessionId("");
-    try {
-      localStorage.removeItem("session_id");
-    } catch {}
+  function removeFileAt(i) {
+    setFiles((prev) => prev.filter((_, idx) => idx !== i));
+  }
 
+  // ----- explicit workspace actions -----
+  async function doCreateWorkspace() {
+    try {
+      setBusy(true);
+      const sid = sessionId || ensureClientSessionId();
+      if (!sessionId) setSessionId(sid);
+      const w = await createWorkspace(sid); // idempotent
+      setWorkspaceId(w.ws_id);
+      showToast(`Workspace prêt: ${w.ws_id}`);
+      if (!announcedWorkspaceRef.current) {
+        announcedWorkspaceRef.current = true;
+        pushAssistant(
+          `✨ Workspace **${w.ws_id}** prêt. Importez vos documents — puis interrogez en mode Workspace.`
+        );
+      }
+    } catch (e) {
+      pushError(e?.message || "Impossible d'assurer le workspace");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doBuildWorkspace() {
+    if (!workspaceId) {
+      showToast("Créez/assurez un workspace d’abord.");
+      return;
+    }
+    try {
+      setBusy(true);
+      const r = await buildWorkspace(workspaceId);
+      const stats = r?.build?.stats ||
+        r?.stats || { total_chunks: "?", total_vectors: "?" };
+      showToast("Index reconstruit.");
+      pushAssistant(
+        `🔧 Index reconstruit pour **${workspaceId}** — chunks: ${stats.total_chunks}, vecteurs: ${stats.total_vectors}.`
+      );
+    } catch (e) {
+      pushError(e?.message || "Échec du rebuild");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ----- history actions -----
+  function newChat() {
     setHistory((h) => [
       ...h,
       {
@@ -219,12 +460,12 @@ export default function Chat() {
         createdAt: Date.now(),
       },
     ]);
-
     setMessages([
       {
         role: "assistant",
-        content:
-          "Nouveau chat. Posez une question ou joignez un document pour l’indexer (workspace requis).",
+        content: `Nouveau chat. Workspace: **${
+          workspaceId || "—"
+        }**. Source: **${sourceMode}**. LLM: **${provider}**`,
       },
     ]);
   }
@@ -236,50 +477,12 @@ export default function Chat() {
 
   function deleteAll() {
     setHistory([]);
-    // eagerly clear the user's history key
     try {
       localStorage.removeItem(keyForUser(user?.id));
     } catch {}
   }
 
-  // ----- workspace actions -----
-  async function doCreateWorkspace() {
-    try {
-      setBusy(true);
-      const w = await createWorkspace(); // { ws_id }
-      setWorkspaceId(w.ws_id);
-      showToast(`Workspace créé: ${w.ws_id}`);
-      pushAssistant(
-        `🧪 Workspace **${w.ws_id}** créé. Uploadez vos documents puis « Rebuild index ».`
-      );
-    } catch (e) {
-      pushError(e?.message || "Impossible de créer un workspace");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function doBuildWorkspace() {
-    if (!workspaceId) {
-      showToast("Créez un workspace d’abord.");
-      return;
-    }
-    try {
-      setBusy(true);
-      const r = await buildWorkspace(workspaceId);
-      showToast("Index reconstruit.");
-      pushAssistant(
-        `🔧 Index reconstruit pour **${workspaceId}** — chunks: ${
-          r?.stats?.total_chunks ?? "?"
-        }, vecteurs: ${r?.stats?.total_vectors ?? "?"}.`
-      );
-    } catch (e) {
-      pushError(e?.message || "Échec rebuild index");
-    } finally {
-      setBusy(false);
-    }
-  }
-
+  // ----- UI -----
   return (
     <div className="min-h-dvh flex relative bg-gradient-to-b from-[#0b0f14] via-[#0b0f14] to-[#0e1218] text-white">
       {/* Left Sidebar */}
@@ -298,19 +501,19 @@ export default function Chat() {
         {/* Top header (model) */}
         <ChatHeader model={model} setModel={setModel} />
 
-        {/* Workspace bar */}
+        {/* Control bar */}
         <div className="px-4 py-2 bg-white/5 border-b border-white/10 flex items-center gap-2">
           <button
             className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-3 py-1.5 hover:bg-white/10 disabled:opacity-50"
             onClick={doCreateWorkspace}
             disabled={busy}
-            title="Copie base → workspace"
+            title="Assurer/Créer le workspace lié à la session"
           >
             <FolderPlus className="h-4 w-4" />
-            Nouveau workspace
+            Assurer workspace
           </button>
           <button
-            className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-3 py-1.5 hover:bg-white/10 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-3 py-1.5 hover:bg-white/10 disabled={busy || !workspaceId}"
             onClick={doBuildWorkspace}
             disabled={busy || !workspaceId}
             title="Reconstruire FAISS pour ce workspace"
@@ -319,18 +522,63 @@ export default function Chat() {
             Rebuild index
           </button>
 
-          <div className="ml-auto text-xs text-white/70">
+          {/* Source selector */}
+          <div className="ml-4">
+            <SourceSwitch
+              mode={sourceMode}
+              setMode={setSourceMode}
+              disabled={!workspaceId}
+            />
+          </div>
+
+          {/* Provider selector */}
+          <div className="ml-4">
+            <ProviderSwitch
+              value={provider}
+              onChange={handleProviderChange}
+              disabled={busy}
+              ready={providerReady}
+            />
+          </div>
+
+          <div className="ml-auto flex items-center gap-3 text-xs text-white/70">
             {busy && <Loader2 className="inline h-4 w-4 mr-1 animate-spin" />}
-            Workspace:{" "}
-            <span className="font-mono text-white/90">
-              {workspaceId || "—"}
+            <span>
+              Session:{" "}
+              <span className="font-mono text-white/90">
+                {sessionId ? String(sessionId).slice(0, 8) : "—"}
+              </span>
+            </span>
+            <span>
+              Workspace:{" "}
+              <span className="font-mono text-white/90">
+                {workspaceId || "—"}
+              </span>
+            </span>
+            <span>
+              Source:{" "}
+              <span className="font-mono text-white/90">
+                {sourceMode === "workspace" ? "Workspace" : "Global"}
+              </span>
+            </span>
+            <span>
+              LLM: <span className="font-mono text-white/90">{provider}</span>
             </span>
           </div>
         </div>
 
+        {/* Workspace banner */}
+        {workspaceId && (
+          <div className="px-4 py-2 bg-emerald-500/10 text-emerald-200 border-b border-emerald-400/20 text-sm">
+            ✅ Workspace actif:{" "}
+            <span className="font-mono text-emerald-100">{workspaceId}</span>.
+            Importez vos documents puis choisissez <b>Workspace</b> pour
+            interroger uniquement ce contenu.
+          </div>
+        )}
+
         {/* Messages */}
         <main className="overflow-y-auto p-6 relative">
-          {/* DnD overlay */}
           {dragOver && (
             <div className="absolute inset-0 z-10 grid place-items-center rounded-lg border-2 border-dashed border-orange-brand/60 bg-black/40">
               <div className="rounded-xl bg-white/10 border border-white/15 px-4 py-3">
@@ -403,9 +651,8 @@ export default function Chat() {
                 onChange={(e) => {
                   const list = Array.from(e.target.files || []);
                   if (list.length) {
-                    setFiles((prev) => [...prev, ...list]);
-                    // Upload immediately
                     doUpload(list);
+                    setFiles((prev) => [...prev, ...list]);
                     e.target.value = "";
                   }
                 }}
@@ -429,8 +676,12 @@ export default function Chat() {
             </div>
 
             <div className="text-[11px] text-white/60 mt-2">
-              Astuce: créez un workspace, uploadez vos docs, « Rebuild index »,
-              puis posez votre question.
+              Source :{" "}
+              <b>{sourceMode === "workspace" ? "Workspace" : "Global"}</b>
+              {" · "}LLM : <b>{provider}</b>
+              {sourceMode === "workspace" && !workspaceId
+                ? " — (aucun workspace actif)"
+                : ""}
             </div>
           </div>
         </footer>

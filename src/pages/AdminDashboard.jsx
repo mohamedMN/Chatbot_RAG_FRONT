@@ -174,10 +174,25 @@ export default function AdminDashboard() {
             ) : (
               <>
                 <div className="text-3xl font-extrabold">
-                  {stats?.documents_total ?? "—"}
+                  {stats?.indexed_total ?? stats?.documents_total ?? "—"}
                 </div>
                 <div className="text-xs text-white/60">
-                  Nouveaux 7j: {stats?.documents_7d ?? "—"}
+                  Nouveaux 7j: {stats?.indexed_7d ?? stats?.documents_7d ?? "—"}
+                </div>
+              </>
+            )}
+          </GlassCard>
+
+          <GlassCard title="Uploads (fichiers)">
+            {loadingStats ? (
+              <Skeleton className="h-8 w-24 bg-white/10" />
+            ) : (
+              <>
+                <div className="text-3xl font-extrabold">
+                  {stats?.uploads_total ?? "—"}
+                </div>
+                <div className="text-xs text-white/60">
+                  7 derniers jours: {stats?.uploads_7d ?? "—"}
                 </div>
               </>
             )}
@@ -298,8 +313,6 @@ export default function AdminDashboard() {
               </Dialog>
             </div>
           </GlassCard>
-
-          
         </section>
 
         <Separator className="bg-white/10" />
