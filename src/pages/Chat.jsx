@@ -13,9 +13,30 @@ import { useAuth } from "../state/AuthContext.jsx";
 import ChatSidebar from "../components/ChatSidebar.jsx";
 import ChatHeader from "../components/ChatHeader.jsx";
 import MessageBubble from "../components/MessageBubble.jsx";
-import { Paperclip, Trash2, Loader2, FolderPlus, Wrench } from "lucide-react";
-
+import {
+  Paperclip,
+  Trash2,
+  Loader2,
+  FolderPlus,
+  Wrench,
+  LogOut,
+} from "lucide-react";
+import AnswerBlock from "../components/AnswerBlock.jsx";
 /* ---------------------------- Inline UI widgets --------------------------- */
+// Map backend → UI label and UI → backend label
+const toUI = (p) =>
+  String(p || "")
+    .toLowerCase()
+    .trim() === "lmstudio"
+    ? "ollama"
+    : String(p || "");
+const toBackend = (p) =>
+  String(p || "")
+    .toLowerCase()
+    .trim() === "ollama"
+    ? "lmstudio"
+    : String(p || "");
+
 function SourceSwitch({ mode, setMode, disabled }) {
   const Opt = ({ value, label }) => {
     const active = mode === value;
@@ -52,8 +73,11 @@ function SourceSwitch({ mode, setMode, disabled }) {
 }
 
 function ProviderSwitch({ value, onChange, disabled, ready }) {
+  // always compare using the UI label ("ollama" | "groq")
+  const uiValue = toUI(value).toLowerCase();
+
   const Btn = ({ id, label }) => {
-    const active = value === id;
+    const isActive = uiValue === id; // id is "ollama" or "groq"
     return (
       <button
         type="button"
@@ -61,7 +85,7 @@ function ProviderSwitch({ value, onChange, disabled, ready }) {
         disabled={disabled}
         className={[
           "px-3 py-1.5 text-sm rounded-lg border transition",
-          active
+          isActive
             ? "bg-orange-brand text-black border-orange-brand"
             : "bg-white/5 text-white/80 border-white/15 hover:bg-white/10",
           disabled ? "opacity-50 cursor-not-allowed" : "",
@@ -71,6 +95,7 @@ function ProviderSwitch({ value, onChange, disabled, ready }) {
       </button>
     );
   };
+
   return (
     <div className="flex items-center gap-2">
       <div className="inline-flex gap-1 bg-white/5 border border-white/10 rounded-xl p-1">
@@ -93,6 +118,7 @@ function ProviderSwitch({ value, onChange, disabled, ready }) {
     </div>
   );
 }
+
 /* ------------------------------------------------------------------------- */
 
 // ---------- localStorage utils ----------
@@ -116,7 +142,7 @@ const ensureClientSessionId = () => {
 };
 
 export default function Chat() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
 
   // UI / state
   const [model, setModel] = useState("Standard");
@@ -252,6 +278,21 @@ export default function Chat() {
   }, []);
 
   // ----- helpers -----
+  function handleLogout() {
+    try {
+      // Nettoyage léger côté client (optionnel)
+      localStorage.removeItem("session_id");
+      // Si tu veux aussi purger l’historique associé à l’utilisateur:
+      try {
+        localStorage.removeItem(keyForUser(user?.id));
+      } catch {}
+      // Tu peux aussi remettre certains états à zéro si tu veux:
+      // setSessionId(""); setWorkspaceId(""); setHistory([]); setMessages([...]);
+    } finally {
+      logout(); // fait la vraie déconnexion (AuthContext)
+    }
+  }
+
   function pushAssistant(text) {
     setMessages((m) => [...m, { role: "assistant", content: text }]);
   }
@@ -270,6 +311,7 @@ export default function Chat() {
       const resp = await selectProvider(next);
       setProvider(resp.provider);
       setProviderReady(!!resp.ready);
+
       localStorage.setItem("llm_provider", resp.provider);
       showToast(
         `Fournisseur: ${resp.provider} (${resp.ready ? "ready" : "not ready"})`
@@ -491,6 +533,7 @@ export default function Chat() {
         onNew={newChat}
         onSelect={openChat}
         onDeleteAll={deleteAll}
+        onLogout={handleLogout} // ⬅️ ici
       />
 
       {/* Right – Chat area */}
@@ -566,7 +609,6 @@ export default function Chat() {
             </span>
           </div>
         </div>
-
         {/* Workspace banner */}
         {workspaceId && (
           <div className="px-4 py-2 bg-emerald-500/10 text-emerald-200 border-b border-emerald-400/20 text-sm">
@@ -590,12 +632,21 @@ export default function Chat() {
           <div className="mx-auto max-w-3xl space-y-4">
             {messages.map((m, i) => (
               <MessageBubble key={i} role={m.role}>
-                {m.content}
-                {m.context && (
-                  <details className="mt-2 text-xs opacity-80">
-                    <summary>Contexte</summary>
-                    <pre className="whitespace-pre-wrap">{m.context}</pre>
-                  </details>
+                {m.role === "assistant" && (m.hits || m.context) ? (
+                  <AnswerBlock
+                    text={m.content}
+                    hits={m.hits}
+                    context={m.context}
+                    debug={{
+                      provider,
+                      hits_count: Array.isArray(m.hits) ? m.hits.length : 0,
+                      top_k: 6,
+                    }}
+                  />
+                ) : (
+                  <div className="prose prose-invert max-w-none">
+                    {m.content}
+                  </div>
                 )}
               </MessageBubble>
             ))}

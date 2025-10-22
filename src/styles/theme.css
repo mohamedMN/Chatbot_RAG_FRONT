@@ -1,0 +1,45 @@
+/* Thème par défaut (dark subtil) */
+:root {
+    --bg: #0b0f14;
+    --bg-2: #0e1218;
+    --panel: rgba(255, 255, 255, 0.05);
+    --panel-hover: rgba(255, 255, 255, 0.10);
+    --border: rgba(255, 255, 255, 0.10);
+    --border-strong: rgba(255, 255, 255, 0.20);
+    --text: rgba(255, 255, 255, 0.92);
+    --text-muted: rgba(255, 255, 255, 0.60);
+    --text-soft: rgba(255, 255, 255, 0.50);
+    --skeleton: rgba(255, 255, 255, 0.10);
+    --badge: rgba(255, 255, 255, 0.10);
+    --brand: #ff8c00;
+    /* ta couleur principale */
+    --brand-contrast: #0a0a0a;
+    /* texte sur brand */
+}
+
+/* Exemple thème Orange (tu peux garder le root et juste override le brand) */
+[data-theme="orange"] {
+    --brand: #ff7900;
+    --brand-contrast: #0a0a0a;
+}
+
+/* Un exemple “bleu corporate” (si besoin) */
+[data-theme="blue"] {
+    --brand: #2d7ff9;
+    --brand-contrast: #ffffff;
+}
+
+/* Variante full light (optionnelle) */
+[data-theme="light"] {
+    --bg: #f8fafc;
+    --bg-2: #ffffff;
+    --panel: #ffffff;
+    --panel-hover: #f3f4f6;
+    --border: rgba(0, 0, 0, 0.10);
+    --border-strong: rgba(0, 0, 0, 0.20);
+    --text: #0b0f14;
+    --text-muted: rgba(0, 0, 0, 0.70);
+    --text-soft: rgba(0, 0, 0, 0.55);
+    --skeleton: rgba(0, 0, 0, 0.08);
+    --badge: rgba(0, 0, 0, 0.06);
+}

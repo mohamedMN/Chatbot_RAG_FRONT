@@ -33,7 +33,7 @@ export default function ProviderSwitch({ value, onChange, disabled, ready }) {
   return (
     <div className="flex items-center gap-2">
       <div className="inline-flex gap-1 bg-white/5 border border-white/10 rounded-xl p-1">
-        {btn("ollama", "Local (Ollama)")}
+        {btn("lmstudio", "Local (Ollama)")}
         {btn("groq", "Cloud (Groq)")}
       </div>
       {typeof ready === "boolean" && (

@@ -188,20 +188,17 @@ export default function HistoryPage() {
           </Card>
 
           <Button
-            variant="outline"
             onClick={loadSessions}
-            className="h-[52px] mt-0 md:self-stretch border-white/20 hover:bg-white/10"
+            className="h-[52px] md:self-stretch bg-black text-white border border-black hover:bg-black/80 hover:text-white"
             title="Rafraîchir la liste des sessions"
           >
             <RefreshCw className="h-4 w-4 mr-2" />
             Rafraîchir
           </Button>
-
           <Dialog open={confirmClear} onOpenChange={setConfirmClear}>
             <DialogTrigger asChild>
               <Button
-                variant="outline"
-                className="h-[52px] md:self-stretch border-red-500/40 text-red-300 hover:bg-red-500/10"
+                className="h-[52px] md:self-stretch bg-black text-white border border-black hover:bg-black/80 hover:text-white"
                 title="Effacer la sélection locale"
               >
                 <Trash2 className="mr-2 h-4 w-4" />

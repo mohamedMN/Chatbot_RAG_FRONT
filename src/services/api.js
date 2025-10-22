@@ -103,12 +103,12 @@ export async function askWorkspace(q, opts = {}, ws_id) {
   if (!ws_id) throw new Error("Workspace id is required");
   const r = await fetch(`${BASE}/ask/workspace`, {
     method: "POST",
-   headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     credentials: "include",
     body: JSON.stringify({
       q,
       k: opts.k ?? 4,
-     min_score: opts.min_score ?? 0.3,
+      min_score: opts.min_score ?? 0.3,
       include_context: !!opts.include_context,
       session_id: ws_id, // workspace ask expects session_id == ws_id
     }),
@@ -116,7 +116,6 @@ export async function askWorkspace(q, opts = {}, ws_id) {
   if (!r.ok) throw new Error(`ask(workspace) failed (${r.status})`);
   return r.json();
 }
-
 
 export async function uploadDoc(file, wsId, autoBuild = true) {
   const fd = new FormData();
@@ -151,6 +150,7 @@ async function endSession() {
     pushAssistant(
       "Session terminée. Workspace supprimé et documents nettoyés."
     );
+    navigate("/");
   } catch (e) {
     pushError(e?.message || "Échec de fermeture de session");
   } finally {
@@ -158,18 +158,17 @@ async function endSession() {
   }
 }
 
-
 export async function selectProvider(provider /* "ollama" | "groq" */) {
   try {
     const { data } = await axios.post(`${BASE}/llm/select`, { provider });
     // expected: { ok: true, provider: "groq"|"ollama", ready: boolean }
     return data;
- } catch (err) {
+  } catch (err) {
     // reuse your error helper if you want; keeping explicit here:
     const msg =
-     err?.response?.data?.detail ||
-     err?.response?.data?.message ||
-     err?.message ||
+      err?.response?.data?.detail ||
+      err?.response?.data?.message ||
+      err?.message ||
       "Provider selection failed";
     throw new Error(msg);
   }
@@ -251,4 +250,12 @@ export async function getMySessions({ limit = 100, offset = 0 } = {}) {
   } catch (err) {
     throw toError(err, "sessions fetch failed");
   }
+}
+
+// src/services/api.ts
+export async function getTimeseries({ period = "this_week" } = {}) {
+  const { data } = await api.get("/admin/metrics/timeseries", {
+    params: { period },
+  });
+  return data;
 }

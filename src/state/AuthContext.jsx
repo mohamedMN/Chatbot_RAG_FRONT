@@ -24,6 +24,7 @@ export function AuthProvider({ children }) {
         if (mounted) setUser(me || null);
       } catch {
         if (mounted) setUser(null);
+        navigate("/");
       } finally {
         if (mounted) setBooting(false);
       }
@@ -68,6 +69,7 @@ export function AuthProvider({ children }) {
     try {
       await apiLogout();
       setUser(null);
+      navigate("/");
     } finally {
       setLoading(false);
     }

@@ -8,6 +8,7 @@ import {
   adminReindex,
   adminFlushIndex,
 } from "../services/api.js";
+import UsageCharts from "@/components/analytics/UsageCharts"
 
 // shadcn
 import { Button } from "@/components/ui/button";
@@ -228,7 +229,9 @@ export default function AdminDashboard() {
             <p className="text-xs text-white/60 mt-1">Utilisateur </p>
           </GlassCard>
         </section>
-
+<section className="grid gap-6 md:grid-cols-1">
+  <UsageCharts />
+</section>
         {/* Maintenance */}
         <section className="grid gap-6 md:grid-cols-3">
           <GlassCard title="Maintenance">

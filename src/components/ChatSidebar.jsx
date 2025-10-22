@@ -1,20 +1,22 @@
 import React from "react";
 import Logo from "./Logo";
+import { LogOut } from "lucide-react";
 
 export default function ChatSidebar({
   history = [],
   onSelect,
   onNew,
   onDeleteAll,
+  onLogout, // ⬅️ nouvelle prop
 }) {
   return (
     <aside className="w-72 bg-neutral-950/60 border-r border-white/10 hidden md:flex md:flex-col">
       <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
-        <Logo/>
+        <Logo />
         <div className="font-semibold">Chat History</div>
       </div>
 
-      <div className="p-3 space-y-3">
+      <div className="p-3 space-y-3 flex-1">
         <button onClick={onNew} className="w-full btn-ghost justify-start">
           New Chat
         </button>
@@ -22,6 +24,7 @@ export default function ChatSidebar({
         <div className="text-xs uppercase tracking-wide text-white/50 px-1">
           Chats
         </div>
+
         <div className="space-y-1">
           {history.length === 0 && (
             <div className="text-white/50 text-sm px-2 py-1">No chats yet</div>
@@ -45,6 +48,18 @@ export default function ChatSidebar({
         >
           Delete Chat History
         </button>
+
+        {/* Bouton Déconnexion (affiché seulement si onLogout est fourni) */}
+        {typeof onLogout === "function" && (
+          <button
+            onClick={onLogout}
+            className="w-full mt-2 inline-flex items-center gap-2 rounded-lg border border-white/20 px-3 py-1.5 hover:bg-white/10 text-white/80 justify-start"
+            title="Se déconnecter"
+          >
+            <LogOut className="h-4 w-4" />
+            <span className="text-sm">Déconnexion</span>
+          </button>
+        )}
       </div>
     </aside>
   );
